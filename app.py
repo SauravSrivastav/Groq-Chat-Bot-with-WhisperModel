@@ -7,9 +7,6 @@ from datetime import datetime
 from fpdf import FPDF
 import base64
 import tempfile
-import speech_recognition as sr
-from pydub import AudioSegment
-import io
 
 # Set page configuration
 st.set_page_config(page_icon="🤖", layout="wide", page_title="Groq AI Playground")
@@ -216,25 +213,6 @@ def generate_chat_responses(chat_completion) -> Generator[str, None, None]:
         if chunk.choices[0].delta.content:
             yield chunk.choices[0].delta.content
 
-# Function to transcribe audio using Whisper
-def transcribe_audio(audio_file, client):
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
-        tmp_file.write(audio_file.getvalue())
-        tmp_file_path = tmp_file.name
-
-    try:
-        with open(tmp_file_path, 'rb') as audio_file:
-            transcription = client.audio.transcriptions.create(
-                model="whisper-large-v3",
-                file=audio_file
-            )
-        return transcription.text
-    except Exception as e:
-        st.error(f"An error occurred during transcription: {str(e)}")
-        return None
-    finally:
-        os.unlink(tmp_file_path)
-
 # Chat interface
 if model_option != "whisper-large-v3":
     # Display chat messages
@@ -284,75 +262,43 @@ if model_option != "whisper-large-v3":
 else:
     # Whisper transcription interface
     st.header("Audio Transcription with Whisper")
+    uploaded_file = st.file_uploader("Choose an audio file", type=['mp3', 'wav', 'm4a'])
     
-    # Option to choose between file upload and voice recording
-    input_option = st.radio("Choose input method:", ("Upload Audio File", "Record Voice"))
-    
-    if input_option == "Upload Audio File":
-        uploaded_file = st.file_uploader("Choose an audio file", type=['mp3', 'wav', 'm4a'])
-        
-        if uploaded_file is not None:
-            if not st.session_state.api_key:
-                st.error("Please enter your Groq API Key in the sidebar.")
-            else:
-                # Create Groq client
-                client = Groq(api_key=st.session_state.api_key)
-                
-                try:
-                    with st.spinner('Transcribing...'):
-                        transcription = transcribe_audio(uploaded_file, client)
-                    
-                    if transcription:
-                        st.success("Transcription completed!")
-                        st.text_area("Transcription:", value=transcription, height=300)
-                        
-                        # Offer download of transcription
-                        st.download_button(
-                            label="Download Transcription",
-                            data=transcription,
-                            file_name="transcription.txt",
-                            mime="text/plain"
+    if uploaded_file is not None:
+        if not st.session_state.api_key:
+            st.error("Please enter your Groq API Key in the sidebar.")
+        else:
+            # Create a temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.'+uploaded_file.name.split('.')[-1]) as tmp_file:
+                tmp_file.write(uploaded_file.getvalue())
+                tmp_file_path = tmp_file.name
+
+            # Create Groq client
+            client = Groq(api_key=st.session_state.api_key)
+
+            try:
+                with st.spinner('Transcribing...'):
+                    with open(tmp_file_path, 'rb') as audio_file:
+                        transcription = client.audio.transcriptions.create(
+                            model="whisper-large-v3",
+                            file=audio_file
                         )
-                except Exception as e:
-                    st.error(f"An error occurred during transcription: {str(e)}")
-    
-    else:  # Record Voice
-        st.write("Click the button below to start recording your voice:")
-        
-        if st.button("Start Recording"):
-            with st.spinner("Recording... Speak now"):
-                r = sr.Recognizer()
-                with sr.Microphone() as source:
-                    audio = r.listen(source, timeout=5)
-                st.success("Recording complete!")
                 
-                # Convert audio to WAV
-                audio_data = sr.AudioData(audio.frame_data, audio.sample_rate, audio.sample_width)
-                wav_data = io.BytesIO(audio_data.get_wav_data())
+                st.success("Transcription completed!")
+                st.text_area("Transcription:", value=transcription.text, height=300)
                 
-                if not st.session_state.api_key:
-                    st.error("Please enter your Groq API Key in the sidebar.")
-                else:
-                    # Create Groq client
-                    client = Groq(api_key=st.session_state.api_key)
-                    
-                    try:
-                        with st.spinner('Transcribing...'):
-                            transcription = transcribe_audio(wav_data, client)
-                        
-                        if transcription:
-                            st.success("Transcription completed!")
-                            st.text_area("Transcription:", value=transcription, height=300)
-                            
-                            # Offer download of transcription
-                            st.download_button(
-                                label="Download Transcription",
-                                data=transcription,
-                                file_name="transcription.txt",
-                                mime="text/plain"
-                            )
-                    except Exception as e:
-                        st.error(f"An error occurred during transcription: {str(e)}")
+                # Offer download of transcription
+                st.download_button(
+                    label="Download Transcription",
+                    data=transcription.text,
+                    file_name="transcription.txt",
+                    mime="text/plain"
+                )
+            except Exception as e:
+                st.error(f"An error occurred during transcription: {str(e)}")
+            finally:
+                # Clean up the temporary file
+                os.unlink(tmp_file_path)
 
 # Add footer
 st.markdown("---")
