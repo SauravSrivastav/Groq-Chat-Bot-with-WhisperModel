@@ -3,3 +3,7 @@ groq
 python-dotenv
 fpdf
 pydub
+torch
+transformers
+yt-dlp
+ffmpeg-python
